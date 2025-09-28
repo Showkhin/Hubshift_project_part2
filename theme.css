@@ -1,0 +1,35 @@
+/* theme.css */
+.block-container {
+    padding-top: 1rem;
+    padding-bottom: 2rem;
+}
+
+div[data-testid="stSidebar"] {
+    background: #0f172a;
+}
+
+.stButton>button,
+.stDownloadButton>button {
+    border-radius: 14px;
+    padding: 0.6rem 1rem;
+    border: 1px solid #334155;
+}
+
+.kpi-card {
+    background: #0b1220;
+    border: 1px solid #1f2a44;
+    border-radius: 16px;
+    padding: 1rem;
+}
+
+.plot-card {
+    background: #0b1220;
+    border: 1px solid #1f2a44;
+    border-radius: 16px;
+    padding: 0.5rem 0.8rem;
+}
+
+.hover-help {
+    color: #94a3b8;
+    font-size: 0.85rem;
+}
