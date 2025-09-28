@@ -1,21 +1,22 @@
 # pages/4_Recommendations.py
 import streamlit as st
-import pandas as pd
+import plotly.graph_objs as go
+from PIL import Image
 
 from ollama_helpers import ollama_generate
 from oci_helpers import load_cloud_csv
 from prep_helpers import DST_PREP
-import viz_helpers  # to regenerate the same plots
-from ui_helpers import QUESTIONS  # shared questions list
+import viz_helpers
+from ui_helpers import QUESTIONS
 
 # =========================
-# Page Configuration
+# Page Config
 # =========================
 st.set_page_config(page_title="Recommendations", page_icon="🧠", layout="wide")
 st.title("🧠 Recommendations")
 
 # =========================
-# Load Data from Cloud
+# Load Data
 # =========================
 df = load_cloud_csv(DST_PREP)
 if df.empty:
@@ -25,7 +26,7 @@ if df.empty:
 st.caption(f"Using cloud file: {DST_PREP} | Records loaded: {len(df)}")
 
 # =========================
-# Navigation
+# Sidebar Question Picker
 # =========================
 q_idx = st.session_state.get("q_idx", 0)
 
@@ -43,7 +44,7 @@ short_q, full_q = QUESTIONS[q_idx]
 st.markdown(f"### Question:\n{full_q}")
 
 # =========================
-# Generate plots for this question only
+# Generate Figures
 # =========================
 figs, wc = [], None
 if q_idx == 0:
@@ -67,34 +68,87 @@ elif q_idx == 8:
 elif q_idx == 9:
     figs = viz_helpers.q10_text_patterns(df)
 
-# Show the figures
-for fig in figs:
-    st.plotly_chart(fig, use_container_width=True)
-if wc is not None:
-    st.image(wc, caption="Word Cloud")
+# =========================
+# Show Figures
+# =========================
+for i, fig in enumerate(figs):
+    if isinstance(fig, go.Figure):
+        st.plotly_chart(fig, use_container_width=True, key=f"plotly_{i}")
+    elif hasattr(fig, "savefig"):  # Matplotlib
+        st.pyplot(fig, key=f"matplotlib_{i}")
+    elif isinstance(fig, Image.Image):  # PIL
+        st.image(fig, caption="Word Cloud", use_column_width=True)
+
+if wc is not None:  # extra wordcloud for Q1
+    st.image(wc, caption="Word Cloud", use_column_width=True)
 
 # =========================
-# Button → Get Recommendation from Ollama
+# Styled Recommendation Helper
+# =========================
+def styled_recommendation(title: str, text: str, level: str = "medium"):
+    colors = {
+        "high": "#ffcccc",    # light red
+        "medium": "#fff4cc",  # light yellow
+        "low": "#ccffcc",     # light green
+    }
+    bg = colors.get(level, "#f0f0f0")
+
+    st.markdown(
+        f"""
+        <div style="
+            background-color: {bg};
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-bottom: 15px;
+            font-weight: bold;
+            font-size: 16px;
+            color: #222;
+            line-height: 1.5;">
+            <strong>{title}</strong><br>
+            {text}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# =========================
+# Button → Generate Recommendation
 # =========================
 if st.button("💡 Generate Recommendation", use_container_width=True):
-    with st.spinner("Thinking with Ollama (local gemma3)..."):
-        # Build a prompt that references the question and shown charts
+    with st.spinner("Thinking with Ollama (bakllava:7b)..."):
         prompt = (
             f"Based only on the visualizations provided for the question:\n\n"
             f"'{full_q}'\n\n"
-            "Give focused, actionable recommendations. Do not describe charts "
-            "that are not shown."
+            "Give focused, actionable recommendations. "
+            "Label them by priority: HIGH, MEDIUM, or LOW."
         )
         resp = ollama_generate(prompt)
 
     if resp.startswith("[Ollama error]"):
-        st.error(resp)
+        st.error(
+            f"Ollama returned an error:\n\n{resp}\n\n"
+            "👉 If this is the first request after starting Ollama, wait ~1–2 minutes for the model to warm up."
+        )
     else:
         st.subheader("💡 Recommendation")
-        st.write(resp)
+
+        # Split response into lines and assign styles based on keywords
+        for line in resp.splitlines():
+            l = line.strip()
+            if not l:
+                continue
+            if l.lower().startswith(("high", "1.")):
+                styled_recommendation("High Priority", l, "high")
+            elif l.lower().startswith(("medium", "2.")):
+                styled_recommendation("Medium Priority", l, "medium")
+            elif l.lower().startswith(("low", "3.")):
+                styled_recommendation("Low Priority", l, "low")
+            else:
+                # fallback: show as medium importance
+                styled_recommendation("Info", l, "medium")
 
 # =========================
-# Navigation Links
+# Navigation
 # =========================
 st.markdown("---")
 col1, col2 = st.columns(2)
