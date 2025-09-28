@@ -1,92 +1,104 @@
 # pages/4_Recommendations.py
-import os
-import tempfile
-from typing import List
-
-import plotly.io as pio
 import streamlit as st
+import pandas as pd
 
-from ui_helpers import top_nav
-from oci_helpers import upload_blob, create_par_url, load_cloud_csv
 from ollama_helpers import ollama_generate
+from oci_helpers import load_cloud_csv
 from prep_helpers import DST_PREP
+import viz_helpers  # to regenerate the same plots
+from ui_helpers import QUESTIONS  # shared questions list
 
+# =========================
+# Page Configuration
+# =========================
 st.set_page_config(page_title="Recommendations", page_icon="🧠", layout="wide")
-
-top_nav()
 st.title("🧠 Recommendations")
 
-csv_name = st.session_state.get("viz_csv_used", DST_PREP)
-q_idx = st.session_state.get("viz_question_idx", 0)
-saved_figs = st.session_state.get("viz_figs", [])
-
-df = load_cloud_csv(csv_name)
+# =========================
+# Load Data from Cloud
+# =========================
+df = load_cloud_csv(DST_PREP)
 if df.empty:
-    st.error("Prepared dataset missing. Please go back and run previous steps.")
+    st.error("No prepared data found (prep.csv). Please run the Process step first.")
     st.stop()
 
-st.caption(f"Using: **{csv_name}** | Question index: {q_idx}")
+st.caption(f"Using cloud file: {DST_PREP} | Records loaded: {len(df)}")
 
-image_urls: List[str] = []
-tmpdir = tempfile.mkdtemp(prefix="plots_")
-for name, obj in saved_figs[:4]:
-    try:
-        local = os.path.join(tmpdir, name)
-        if hasattr(obj, "to_dict"):  # plotly fig
-            pio.write_image(obj, local, format="png", width=1200, height=700, scale=2)
-        else:  # PIL
-            obj.save(local)
-        with open(local, "rb") as f:
-            upload_blob(f"plots/{name}", f.read(), content_type="image/png")
-        url = create_par_url(f"plots/{name}")
-        if url: image_urls.append(url)
-    except Exception:
-        pass  # fallback to text-only if needed
+# =========================
+# Navigation
+# =========================
+q_idx = st.session_state.get("q_idx", 0)
 
-def quick_stats_str(d):
-    parts=[]
-    if "incident_type" in d.columns:
-        parts.append("Top incident types: " + ", ".join(f"{k}({v})" for k,v in d["incident_type"].value_counts().head(10).to_dict().items()))
-    if "severity_norm" in d.columns:
-        parts.append("Severity mix: " + ", ".join(f"{k}({v})" for k,v in d["severity_norm"].value_counts().to_dict().items()))
-    if "organization" in d.columns:
-        parts.append("Top orgs: " + ", ".join(f"{k}({v})" for k,v in d["organization"].value_counts().head(10).to_dict().items()))
-    if "emotion_norm" in d.columns:
-        parts.append("Emotions: " + ", ".join(f"{k}({v})" for k,v in d["emotion_norm"].value_counts().to_dict().items()))
-    return "\n".join(parts)
+st.sidebar.header("Pick a question")
+for i, (short, full) in enumerate(QUESTIONS):
+    if st.sidebar.button(short, key=f"q{i}", help=full):
+        st.session_state["q_idx"] = i
+        q_idx = i
+        st.rerun()
 
-summary_txt = quick_stats_str(df)
+# =========================
+# Display Question
+# =========================
+short_q, full_q = QUESTIONS[q_idx]
+st.markdown(f"### Question:\n{full_q}")
 
-prompt = (
-    "You are advising an NDIS service provider. "
-    "Analyze ONLY the provided charts (use image URLs if available) and the fallback data summary. "
-    "For EACH chart, provide:\n"
-    "1) 3–5 MOST IMPORTANT insights (prefix each with [HIGH])\n"
-    "2) 2–4 less important but useful notes (prefix each with [LOW])\n"
-    "3) A concise recommendations section: staffing, risk mitigation, scheduling, training, follow-up actions.\n"
-    "Be specific and actionable.\n\n"
-)
+# =========================
+# Generate plots for this question only
+# =========================
+figs, wc = [], None
+if q_idx == 0:
+    figs, wc = viz_helpers.q1_incident_types(df)
+elif q_idx == 1:
+    figs = viz_helpers.q2_client_groups(df)
+elif q_idx == 2:
+    figs = viz_helpers.q3_when(df)
+elif q_idx == 3:
+    figs = viz_helpers.q4_resolution(df)
+elif q_idx == 4:
+    figs = viz_helpers.q5_org_rates(df)
+elif q_idx == 5:
+    figs = viz_helpers.q6_emotions(df)
+elif q_idx == 6:
+    figs = viz_helpers.q7_reporters(df)
+elif q_idx == 7:
+    figs = viz_helpers.q8_recurrence(df)
+elif q_idx == 8:
+    figs = viz_helpers.q9_actions(df)
+elif q_idx == 9:
+    figs = viz_helpers.q10_text_patterns(df)
 
-if image_urls:
-    prompt += "Charts (public URLs):\n" + "\n".join(image_urls) + "\n\n"
-else:
-    prompt += "(No chart image URLs available; use the fallback data summary.)\n\n"
+# Show the figures
+for fig in figs:
+    st.plotly_chart(fig, use_container_width=True)
+if wc is not None:
+    st.image(wc, caption="Word Cloud")
 
-prompt += "Fallback data summary:\n" + summary_txt
+# =========================
+# Button → Get Recommendation from Ollama
+# =========================
+if st.button("💡 Generate Recommendation", use_container_width=True):
+    with st.spinner("Thinking with Ollama (local gemma3)..."):
+        # Build a prompt that references the question and shown charts
+        prompt = (
+            f"Based only on the visualizations provided for the question:\n\n"
+            f"'{full_q}'\n\n"
+            "Give focused, actionable recommendations. Do not describe charts "
+            "that are not shown."
+        )
+        resp = ollama_generate(prompt)
 
-with st.spinner("Calling Ollama for recommendations..."):
-    resp = ollama_generate(prompt, images=image_urls if image_urls else None)
+    if resp.startswith("[Ollama error]"):
+        st.error(resp)
+    else:
+        st.subheader("💡 Recommendation")
+        st.write(resp)
 
-def highlight(text: str) -> str:
-    return (text
-            .replace("[HIGH]", "<span style='color:#22c55e;font-weight:600'>[HIGH]</span>")
-            .replace("[LOW]", "<span style='color:#eab308;font-weight:600'>[LOW]</span>"))
-
-st.markdown(highlight(resp), unsafe_allow_html=True)
-
-st.divider()
-cols = st.columns(2)
-with cols[0]:
-    st.page_link("pages/3_Visualization.py", label="⬅️ Back to Questions", use_container_width=True)
-with cols[1]:
-    st.page_link("app.py", label="🏠 Home", use_container_width=True)
+# =========================
+# Navigation Links
+# =========================
+st.markdown("---")
+col1, col2 = st.columns(2)
+with col1:
+    st.page_link("pages/3_Visualization.py", label="⬅️ Back to Questions")
+with col2:
+    st.page_link("app.py", label="🏠 Home")

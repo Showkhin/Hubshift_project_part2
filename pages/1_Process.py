@@ -1,4 +1,3 @@
-# pages/1_Process.py
 import streamlit as st
 from ui_helpers import top_nav, show_csv
 from oci_helpers import load_cloud_csv
@@ -19,14 +18,14 @@ show_csv(merged.head(500), "Merged data preview")
 st.divider()
 c1, c2 = st.columns(2)
 with c1:
-    if st.button("🧠 Prepare by Ollama", help="Use BakLLaVA-7B to normalize categories", use_container_width=True, key="prep_ollama"):
-        with st.spinner("Preparing with Ollama..."):
+    if st.button("🧠 Prepare by Ollama", help="Use local gemma3 to normalize categories", use_container_width=True):
+        with st.spinner("Preparing with Ollama (gemma3)..."):
             df = ollama_prepare(merged)
             which = write_prepared(df, "ollama")
             st.session_state["prep_variant"] = "ollama"
         st.success(f"Saved {which} and updated prep.csv in cloud.")
 with c2:
-    if st.button("🧹 Prepare without Ollama", help="Deterministic cleanup only", use_container_width=True, key="prep_manual"):
+    if st.button("🧹 Prepare without Ollama", help="Deterministic cleanup only", use_container_width=True):
         with st.spinner("Preparing manually..."):
             df = manual_prepare(merged)
             which = write_prepared(df, "manual")

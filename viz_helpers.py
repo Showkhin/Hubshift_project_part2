@@ -1,4 +1,3 @@
-# viz_helpers.py
 from io import BytesIO
 from typing import List, Tuple, Optional
 import matplotlib.pyplot as plt
@@ -89,8 +88,6 @@ def q3_when(df: pd.DataFrame):
     return figs
 
 # 4
-import plotly.express as px
-
 def q4_resolution(df):
     """
     Visualization: How quickly are incidents resolved?
@@ -130,19 +127,6 @@ def q4_resolution(df):
             labels={"resolution_hours": "Resolution Time (hours)"},
         )
         st.plotly_chart(fig2, use_container_width=True, key="resolution_box")
-        figs.append(fig2)
-
-    return figs
-
-    # Boxplot
-    with tab2:
-        fig2 = px.box(
-            df,
-            x="resolution_hours",
-            title="Resolution Time Spread",
-            labels={"resolution_hours": "Resolution Time (hours)"},
-        )
-        st.plotly_chart(fig2, use_container_width=True)
         figs.append(fig2)
 
     return figs
@@ -258,7 +242,7 @@ def q10_text_patterns(df):
 
     figs = []
 
-    # --- Keyword frequency ---
+    # Keyword frequency
     text_series = df["description"].dropna().astype(str)
     words = " ".join(text_series).split()
     freq = pd.Series(words).value_counts().reset_index()
@@ -274,7 +258,7 @@ def q10_text_patterns(df):
     st.plotly_chart(fig1, use_container_width=True, key="textpattern_bar")
     figs.append(fig1)
 
-    # --- WordCloud ---
+    # WordCloud
     if not text_series.empty:
         text = " ".join(text_series)
         wc = WordCloud(width=800, height=400, background_color="black", colormap="viridis").generate(text)
@@ -282,8 +266,8 @@ def q10_text_patterns(df):
         fig2, ax = plt.subplots(figsize=(10, 5))
         ax.imshow(wc, interpolation="bilinear")
         ax.axis("off")
-        st.pyplot(fig2)  # ✅ No key here
-        plt.close(fig2)  # ✅ Close figure after rendering
+        st.pyplot(fig2)
+        plt.close(fig2)
         figs.append(fig2)
 
     return figs

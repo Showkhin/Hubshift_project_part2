@@ -1,57 +1,109 @@
 # ollama_helpers.py
-import json
 import os
-from typing import List, Optional
-
+import json
 import requests
-import streamlit as st
 
-def _ollama_base():
-    if "OLLAMA_BASE_URL" in st.secrets:
-        return st.secrets["OLLAMA_BASE_URL"].rstrip("/")
-    return os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+# --- Ollama API setup (now using bakllava:7b everywhere) ---
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "bakllava:7b")
+GEN_URL = os.getenv("OLLAMA_URL_GENERATE", "http://127.0.0.1:11434/api/generate")
+CHAT_URL = os.getenv("OLLAMA_URL_CHAT", "http://127.0.0.1:11434/v1/chat/completions")
 
-def _ollama_model():
-    if "OLLAMA_MODEL" in st.secrets:
-        return st.secrets["OLLAMA_MODEL"]
-    return os.getenv("OLLAMA_MODEL", "bakllava:7b")
 
-def _gen_url():
-    if "OLLAMA_URL_GENERATE" in st.secrets:
-        return st.secrets["OLLAMA_URL_GENERATE"]
-    return _ollama_base() + "/api/generate"
+# --- Helpers ---
+def clean_markdown_json(text: str) -> str:
+    """Remove markdown fences (```json ... ```), so JSON loads cleanly."""
+    t = text.strip()
+    if t.startswith("```"):
+        lines = t.splitlines()
+        if len(lines) >= 3:
+            return "\n".join(lines[1:-1]).strip()
+        return t.replace("```json", "").replace("```", "")
+    return t
 
-def ollama_generate(prompt: str, images: Optional[List[str]] = None, stream: bool = False, timeout: int = 120) -> str:
-    url = _gen_url()
-    payload = {"model": _ollama_model(), "prompt": prompt, "stream": stream}
+
+def _ollama_generate_json(prompt: str, images=None) -> dict:
+    """Call Ollama to generate JSON using /api/generate, fallback to chat if needed."""
+    # Try /api/generate first
+    try:
+        payload = {"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}
+        if images:
+            payload["images"] = images
+
+        r = requests.post(GEN_URL, json=payload, timeout=120)
+        if r.status_code == 200:
+            raw = (r.json().get("response") or "").strip()
+            if raw:
+                return json.loads(clean_markdown_json(raw))
+    except Exception as e:
+        print(f"[Ollama generate failed] {e}")
+
+    # Fallback: /v1/chat/completions
+    try:
+        msg = [{"role": "user", "content": prompt}]
+        if images:
+            msg[0]["images"] = images
+
+        r = requests.post(
+            CHAT_URL,
+            json={"model": OLLAMA_MODEL, "messages": msg, "stream": False},
+            timeout=120,
+        )
+        if r.status_code == 200:
+            j = r.json()
+            raw = j["choices"][0]["message"]["content"].strip()
+            if raw:
+                return json.loads(clean_markdown_json(raw))
+    except Exception as e:
+        print(f"[Ollama chat failed] {e}")
+
+    return {}
+
+
+# --- Public API ---
+def ollama_generate(prompt: str, images=None, stream: bool = False, timeout: int = 120) -> str:
+    """General text generation using bakllava:7b."""
+    payload = {"model": OLLAMA_MODEL, "prompt": prompt, "stream": stream}
     if images:
         payload["images"] = images
+
     try:
-        r = requests.post(url, json=payload, timeout=timeout)
+        r = requests.post(GEN_URL, json=payload, timeout=timeout, stream=stream)
         r.raise_for_status()
-        js = r.json()
-        # /api/generate returns chunk(s). If server streams disabled, we get single object with 'response'.
-        return js.get("response", "").strip()
+
+        if stream:
+            output = []
+            for line in r.iter_lines():
+                if line:
+                    try:
+                        js = json.loads(line.decode("utf-8"))
+                        chunk = js.get("response", "")
+                        if chunk:
+                            output.append(chunk)
+                    except Exception:
+                        continue
+            return "".join(output).strip()
+        else:
+            js = r.json()
+            return (js.get("response") or "").strip()
+
     except Exception as e:
         return f"[Ollama error] {e}"
 
-def ask_for_category_mapping(column_name: str, values: List[str]) -> dict:
+
+def ask_for_category_mapping(column_name: str, values: list) -> dict:
     """
-    Best-effort JSON mapping via LLM. Returns {} if the model can't supply a valid JSON object.
+    Ask bakllava:7b locally to return a JSON dict for normalizing categories.
+    Example: raw 'severity' → {"low": "Low", "med": "Medium", ...}
     """
     if not values:
         return {}
+
     prompt = (
         f"You are a data cleaning assistant for NDIS incident data. "
-        f"Create a JSON dictionary mapping raw '{column_name}' values "
-        f"to a short, normalized category. Return ONLY a JSON object, no explanations.\n\n"
+        f"Return a JSON dictionary mapping each raw '{column_name}' value "
+        f"to a normalized category. Return ONLY valid JSON.\n\n"
         f"Values:\n" + "\n".join(f"- {v}" for v in values[:120])
     )
-    raw = ollama_generate(prompt, images=None)
-    try:
-        start = raw.find("{"); end = raw.rfind("}")
-        if start >= 0 and end > start:
-            return json.loads(raw[start:end+1])
-    except Exception:
-        pass
-    return {}
+
+    result = _ollama_generate_json(prompt)
+    return result if isinstance(result, dict) else {}

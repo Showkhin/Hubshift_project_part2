@@ -1,9 +1,63 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
+*.log
+*.sqlite3
+*.db
+
+# Build & packaging
 dist/
 build/
-.ipynb_checkpoints
+*.spec
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Environment & secrets
 .env
-.streamlit/secrets.toml
 venv/
+.venv/
+ENV/
+env/
+.streamlit/secrets.toml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Data files (generated or temporary)
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.parquet
+*.h5
+*.pkl
+*.joblib
+*.npz
+*.npy
+
+# Large media
+*.wav
+*.mp3
+*.mp4
+*.avi
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.h5
+
+# Hugging Face / Transformers cache
+.cache/
+transformers_cache/
+torch_cache/
+tf_cache/
